@@ -194,9 +194,19 @@
         <p>Descarga .ics con recordatorios automáticos para Google Calendar o iPhone.</p>
       </div>
       <div class="cal-actions">
-        <button class="btn-cal" onclick="exportICS()">⬇ .ics</button>
+        <button class="btn-cal" onclick="exportICS()">⬇ Pagos .ics</button>
+        <button class="btn-cal" style="background:rgba(255,255,255,0.15);color:var(--cream);" onclick="exportResetReminder()">🔄 Recordatorio reset</button>
       </div>
     </div>
+    <div id="reset-banner" style="display:none;background:linear-gradient(135deg,#7C9A7E,#5E8460);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;color:white;align-items:center;gap:12px;box-shadow:var(--shadow-lg);">
+      <div style="font-size:22px;">🔄</div>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">¡Nuevo mes! Reinicia tus pagos</div>
+        <div style="font-size:11px;opacity:0.85;">Toca el botón para marcar todo como pendiente y empezar el mes limpio.</div>
+      </div>
+      <button onclick="resetMonth()" style="background:white;color:#4A7A4C;border:none;padding:8px 14px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;">🔄 Reiniciar mes</button>
+    </div>
+
     <div id="urgent-section"><div class="section-title">🔴 Urgente</div><div class="payment-list" id="list-urgent"></div></div>
     <div id="soon-section"><div class="section-title">🟡 Esta semana</div><div class="payment-list" id="list-soon"></div></div>
     <div id="ok-section"><div class="section-title">🟢 Tranquila — Tiempo disponible</div><div class="payment-list" id="list-ok"></div></div>
@@ -336,9 +346,9 @@ const INCOME = 3674468;
 const DAVIVIENDA = 700000; // ya descontado de nómina
 
 let payments = JSON.parse(localStorage.getItem('klh_payments_v3') || 'null') || [
-  { id:1,  name:'Hipoteca',             amount:758000,  dueDay:30, type:'🏠', note:'Pago más importante del mes', paid:false, pending:false },
-  { id:2,  name:'Claro Celular',        amount:56500,   dueDay:30, type:'📱', note:'', paid:false, pending:false },
-  { id:3,  name:'Claro Hogar',          amount:121000,  dueDay:30, type:'📱', note:'', paid:false, pending:false },
+  { id:1,  name:'Hipoteca',             amount:758000,  dueDay:19, type:'🏠', note:'Pagar el 15 de cada mes', paid:false, pending:false },
+  { id:2,  name:'Claro Celular',        amount:56500,   dueDay:11, type:'📱', note:'Pagar el 30 del mes anterior', paid:false, pending:false },
+  { id:3,  name:'Claro Hogar',          amount:121000,  dueDay:14, type:'📱', note:'Pagar el 30 del mes anterior', paid:false, pending:false },
   { id:4,  name:'Internet Mamá',        amount:170000,  dueDay:30, type:'📡', note:'Pago a favor de mamá', paid:false, pending:false },
   { id:5,  name:'Recibo Gas',           amount:40000,   dueDay:4,  type:'🔥', note:'Vence el 4 de cada mes', paid:false, pending:false },
   { id:6,  name:'Recibo Luz',           amount:150000,  dueDay:15, type:'⚡', note:'', paid:false, pending:false },
@@ -730,6 +740,61 @@ function showToast(msg) {
   setTimeout(()=>t.classList.remove('show'),2800);
 }
 
+// ===== RESET MENSUAL =====
+function checkNewMonth() {
+  const d = today();
+  const currentMonthKey = `${d.getFullYear()}-${d.getMonth()}`;
+  const lastResetKey = localStorage.getItem('klh_last_reset');
+  // Mostrar banner si hay pagos marcados como pagados Y es un mes nuevo
+  const hasPaid = payments.some(p => p.paid);
+  if (hasPaid && lastResetKey !== currentMonthKey) {
+    const banner = document.getElementById('reset-banner');
+    banner.style.display = 'flex';
+  }
+}
+
+function resetMonth() {
+  const d = today();
+  const currentMonthKey = `${d.getFullYear()}-${d.getMonth()}`;
+  if (!confirm('¿Reiniciar todos los pagos como pendientes para el nuevo mes?')) return;
+  payments.forEach(p => p.paid = false);
+  localStorage.setItem('klh_last_reset', currentMonthKey);
+  save();
+  document.getElementById('reset-banner').style.display = 'none';
+  renderPagos(); renderResumen();
+  showToast('🔄 ¡Mes reiniciado! Todos los pagos están pendientes.');
+}
+
+function generateResetReminderICS() {
+  const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//KLH Finanzas//ES','CALSCALE:GREGORIAN'];
+  const d = today();
+  for (let m = 0; m < 12; m++) {
+    const resetDate = new Date(d.getFullYear(), d.getMonth() + m + 1, 1);
+    const dateStr = resetDate.toISOString().slice(0,10).replace(/-/g,'');
+    lines.push('BEGIN:VEVENT');
+    lines.push(`UID:klh-reset-${m}-${Date.now()}@finanzas`);
+    lines.push(`DTSTART;VALUE=DATE:${dateStr}`);
+    lines.push(`DTEND;VALUE=DATE:${dateStr}`);
+    lines.push(`SUMMARY:🔄 Reiniciar pagos en Finanzas KLH`);
+    lines.push(`DESCRIPTION:Abre tu app de Finanzas KLH y toca el botón Reiniciar mes para empezar el mes limpio.`);
+    lines.push('BEGIN:VALARM');
+    lines.push('TRIGGER:-PT0S');
+    lines.push('ACTION:DISPLAY');
+    lines.push('DESCRIPTION:🔄 Reinicia tus pagos mensuales en Finanzas KLH');
+    lines.push('END:VALARM');
+    lines.push('END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+
+function exportResetReminder() {
+  const blob = new Blob([generateResetReminderICS()], {type:'text/calendar;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'KLH_Recordatorio_Reset.ics'; a.click();
+  showToast('📅 Recordatorio de reset descargado.');
+}
+
 function init() {
   const d=today();
   const ds=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -738,6 +803,7 @@ function init() {
   document.getElementById('month-display').textContent=`${ms[d.getMonth()]} ${d.getFullYear()}`;
   document.getElementById('exp-date').value=d.toISOString().slice(0,10);
   renderPagos(); renderResumen(); renderExpenses(); renderBudgetInputs();
+  checkNewMonth();
 }
 
 init();
